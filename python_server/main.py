@@ -26,9 +26,15 @@ logger = logging.getLogger('uvicorn.error')
 
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["example.com", "*.example.com", "127.0.0.1"])
 # # CORS configuration
+
+origins = [
+    "http://localhost:3000",
+    "http://localhost:8080",
+    "http://localhost",
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.cors_origins,
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

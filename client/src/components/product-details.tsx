@@ -25,23 +25,23 @@ export default function ProductDetails({ productId }: ProductDetailsProps) {
   const { toast } = useToast();
 
   const { data: product, isLoading } = useQuery<Product>({
-    queryKey: ['/api/products', productId],
+    queryKey: ['/products', productId],
     enabled: !!productId,
   });
 
   const { data: analytics } = useQuery<ProductAnalytics[]>({
-    queryKey: ['/api/analytics/products', productId],
+    queryKey: ['/analytics/products', productId],
     enabled: !!productId,
   });
 
   const updateMutation = useMutation({
     mutationFn: async (data: Partial<Product>) => {
       if (!productId) throw new Error('No product ID');
-      return apiRequest('PUT', `/api/products/${productId}`, data);
+      return apiRequest('PUT', `/products/${productId}`, data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
-      queryClient.invalidateQueries({ queryKey: ['/api/products', productId] });
+      queryClient.invalidateQueries({ queryKey: ['/products'] });
+      queryClient.invalidateQueries({ queryKey: ['/products', productId] });
       setIsEditing(false);
       toast({
         title: "Success",

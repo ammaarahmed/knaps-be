@@ -52,10 +52,10 @@ export default function AddProduct() {
 
   const createMutation = useMutation({
     mutationFn: async (data: InsertProduct) => {
-      return apiRequest('POST', '/api/products', data);
+      return apiRequest('POST', '/products', data);
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      queryClient.invalidateQueries({ queryKey: ['/products'] });
       form.reset();
       toast({
         title: "Success",

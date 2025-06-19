@@ -46,7 +46,7 @@ class SQLStorage:
 
     async def search_products(self, query: str) -> List[Product]:
         q = f"%{query.lower()}%"
-        logger.info("Printing query {q}")
+        logger.info(f"Printing query {q}")
         async with AsyncSessionLocal() as session:
             stmt = select(ProductModel).where(
                 (ProductModel.product_name.ilike(q))
@@ -87,7 +87,7 @@ class SQLStorage:
 
     # SellIn operations
     async def get_sell_ins(
-        self, product_id: Optional[str] = None, month: Optional[str] = None
+        self, product_id: Optional[int] = None, month: Optional[str] = None
     ) -> List[SellIn]:
         async with AsyncSessionLocal() as session:
             stmt = select(SellInModel)
@@ -108,7 +108,7 @@ class SQLStorage:
 
     # SellThrough operations
     async def get_sell_throughs(
-        self, product_id: Optional[str] = None, month: Optional[str] = None
+        self, product_id: Optional[int] = None, month: Optional[str] = None
     ) -> List[SellThrough]:
         async with AsyncSessionLocal() as session:
             stmt = select(SellThroughModel)
@@ -129,7 +129,7 @@ class SQLStorage:
 
     # Analytics operations
     async def get_product_analytics(
-        self, product_id: Optional[str] = None, month: Optional[str] = None
+        self, product_id: Optional[int] = None, month: Optional[str] = None
     ) -> List[ProductAnalytics]:
         async with AsyncSessionLocal() as session:
             prod_stmt = select(ProductModel)
@@ -152,6 +152,7 @@ class SQLStorage:
                 total_revenue = sum(float(st.total_revenue) for st in sell_throughs)
                 current_stock = sell_in_qty - sell_through_qty
                 turnover_rate = (sell_through_qty / sell_in_qty * 100) if sell_in_qty else 0
+                logger.info(f"Product ID {p.id} and var type {type(p.id)}")
                 analytics.append(
                     ProductAnalytics(
                         product_id=p.id,

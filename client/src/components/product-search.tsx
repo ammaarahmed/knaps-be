@@ -14,7 +14,7 @@ export default function ProductSearch({ onSelectProduct }: ProductSearchProps) {
   const [showResults, setShowResults] = useState(false);
 
   const { data: searchResults = [] } = useQuery<Product[]>({
-    queryKey: ['/api/products/search', query],
+    queryKey: ['/products/search', query],
     queryFn: async () => {
       if (query.length < 2) return [];
       const response = await fetch(

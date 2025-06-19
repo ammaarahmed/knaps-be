@@ -23,11 +23,11 @@ export default function BulkUpload() {
 
   const uploadMutation = useMutation({
     mutationFn: async (data: any[]) => {
-      const response = await apiRequest('POST', '/api/products/bulk', data);
+      const response = await apiRequest('POST', '/products/bulk', data);
       return response.json();
     },
     onSuccess: (result) => {
-      queryClient.invalidateQueries({ queryKey: ['/api/products'] });
+      queryClient.invalidateQueries({ queryKey: ['/products'] });
       setUploadResult(result);
       toast({
         title: "Upload Complete",

@@ -8,11 +8,11 @@ export default function Analytics() {
   const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM format
 
   const { data: overallAnalytics, isLoading: overallLoading } = useQuery<OverallAnalytics>({
-    queryKey: ['/api/analytics/overall', currentMonth],
+    queryKey: ['/analytics/overall', currentMonth],
   });
 
   const { data: productAnalytics = [], isLoading: productLoading } = useQuery<ProductAnalytics[]>({
-    queryKey: ['/api/analytics/products', currentMonth],
+    queryKey: ['/analytics/products', currentMonth],
   });
 
   if (overallLoading || productLoading) {

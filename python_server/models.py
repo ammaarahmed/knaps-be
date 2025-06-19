@@ -71,7 +71,7 @@ class Product(InsertProduct):
 
 # SellIn models
 class InsertSellIn(ORMBase):
-    product_id: str
+    product_id: int
     quantity: int
     unit_cost: Decimal
     total_cost: Decimal
@@ -85,7 +85,7 @@ class SellIn(InsertSellIn):
 
 # SellThrough models
 class InsertSellThrough(ORMBase):
-    product_id: str
+    product_id: int
     quantity: int
     unit_price: Decimal
     total_revenue: Decimal
@@ -99,7 +99,7 @@ class SellThrough(InsertSellThrough):
 
 # Analytics types
 class ProductAnalytics(ORMBase):
-    product_id: str
+    product_id: int
     product_name: str
     product_code: str
     brand_name: str

@@ -13,36 +13,36 @@ async def test_product_crud(client):
         "trade": 10.0,
         "rrp": 12.0
     }
-    resp = await client.post("/api/products", json=product)
+    resp = await client.post("/products", json=product)
     assert resp.status_code == 201
     created = resp.json()
     pid = created["id"]
 
-    resp = await client.get("/api/products")
+    resp = await client.get("/products")
     assert resp.status_code == 200
     assert any(p["id"] == pid for p in resp.json())
 
-    resp = await client.get(f"/api/products/{pid}")
+    resp = await client.get(f"/products/{pid}")
     assert resp.status_code == 200
     assert resp.json()["product_name"] == "Prod1"
 
-    resp = await client.get("/api/products/search", params={"q": "Pro"})
+    resp = await client.get("/products/search", params={"q": "Pro"})
     assert resp.status_code == 200
     assert len(resp.json()) >= 1
 
-    resp = await client.put(f"/api/products/{pid}", json={"product_name": "New"})
+    resp = await client.put(f"/products/{pid}", json={"product_name": "New"})
     assert resp.status_code == 200
     assert resp.json()["product_name"] == "New"
 
-    resp = await client.delete(f"/api/products/{pid}")
+    resp = await client.delete(f"/products/{pid}")
     assert resp.status_code == 204
 
-    resp = await client.get(f"/api/products/{pid}")
+    resp = await client.get(f"/products/{pid}")
     assert resp.status_code == 404
 
 @pytest.mark.asyncio
 async def test_search_short_query(client):
-    resp = await client.get("/api/products/search", params={"q": "x"})
+    resp = await client.get("/products/search", params={"q": "x"})
     assert resp.status_code == 200
     assert resp.json() == []
 
@@ -60,7 +60,7 @@ async def test_bulk_and_related(client):
         {**base, "product_code": "B1", "product_name": "Bulk1"},
         {**base, "product_code": "B1", "product_name": "BulkDup"},
     ]
-    resp = await client.post("/api/products/bulk", json=data)
+    resp = await client.post("/products/bulk", json=data)
     assert resp.status_code == 200
     body = resp.json()
     assert body["success"] == 1
@@ -100,13 +100,13 @@ async def test_bulk_and_related(client):
     assert len(resp.json()) == 1
 
     month = date.today().strftime("%Y-%m")
-    resp = await client.get("/api/analytics/products", params={"product_id": pid, "month": month})
+    resp = await client.get("/analytics/products", params={"product_id": pid, "month": month})
     assert resp.status_code == 200
     data = resp.json()[0]
     assert data["sell_in_quantity"] == 10
     assert data["sell_through_quantity"] == 4
 
-    resp = await client.get("/api/analytics/overall", params={"month": month})
+    resp = await client.get("/analytics/overall", params={"month": month})
     assert resp.status_code == 200
     overall = resp.json()
     assert overall["total_sell_in"] >= 10

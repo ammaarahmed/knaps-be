@@ -1,11 +1,42 @@
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Literal, Optional, Union
 from decimal import Decimal
 from datetime import datetime, date
+from uuid import UUID, uuid4
 
 
 class ORMBase(BaseModel):
     model_config = {"from_attributes": True}
+
+# Auth models
+class Org(ORMBase):
+    org_name: str
+    org_id: int
+    org_uuid: UUID = Field(default_factory=uuid4)
+    created_at: datetime
+    updated_at: datetime
+
+class Store(ORMBase):
+    store_name: str
+    store_id: int
+    store_uuid: UUID = Field(default_factory=uuid4)
+    created_at: datetime
+    updated_at: datetime
+
+class User(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
+    level: Optional[Literal['superadmin', 'admin', 'user']] = None
+    org: Optional[Org] = None
+    store: Optional[Store] = None
+    created_at: datetime
+    updated_at: datetime
+    
+class Token(ORMBase):
+    access_token: str
+    token_type: str
 
 # Product models
 class InsertProduct(ORMBase):
@@ -36,7 +67,8 @@ class InsertProduct(ORMBase):
     badges_codes: Optional[str] = None
     stock_unmanaged: bool = False
 
-class UpdateProduct(ORMBase):
+class Product(ORMBase):
+    uuid: Optional[str] = None  # Optional UUID field for updates
     distributor_name: Optional[str] = None
     brand_name: Optional[str] = None
     product_code: Optional[str] = None
@@ -64,38 +96,28 @@ class UpdateProduct(ORMBase):
     badges_codes: Optional[str] = None
     stock_unmanaged: Optional[bool] = None
 
-class Product(InsertProduct):
-    id: int
-    created_at: datetime
-    updated_at: datetime
-
-# SellIn models
-class InsertSellIn(ORMBase):
-    product_id: int
-    quantity: int
-    unit_cost: Decimal
-    total_cost: Decimal
-    transaction_date: date
-    month_partition: str = Field(..., min_length=7, max_length=7)
-    notes: Optional[str] = None
-
-class SellIn(InsertSellIn):
-    id: int
-    created_at: datetime
-
 # SellThrough models
-class InsertSellThrough(ORMBase):
+class BaseDeal(ORMBase):
+    deal_id: Optional[int] = None
+    deal_uuid: Optional[UUID] = None
+    deal_code: Optional[str] = None
+    deal_type: Literal['sell_in', 'sell_through', 'price_protection', 'off_invoice_discount']
     product_id: int
-    quantity: int
-    unit_price: Decimal
-    total_revenue: Decimal
-    transaction_date: date
-    month_partition: str = Field(..., min_length=7, max_length=7)
-    customer_info: Optional[str] = None
+    product_uuid: UUID = Field(default_factory=uuid4)
+    amount_type: Literal['quantity', 'value']
+    amount: Decimal
+    start_date: date 
+    end_date: date
+    yeamonth_partition: str = Field(..., min_length=7, max_length=7)
+    provider: Literal['head office', 'distributor', 'narta']
+    store_amount: Optional[Decimal] = None
+    head_office_amount: Optional[Decimal] = None
+    trade_price: Optional[Decimal] = None
+    created_at: Optional[datetime] = None
+    created_by: Optional[str] = None
+    updated_at: Optional[datetime] = None
+    updated_by: Optional[str] = None
 
-class SellThrough(InsertSellThrough):
-    id: int
-    created_at: datetime
 
 # Analytics types
 class ProductAnalytics(ORMBase):
@@ -103,14 +125,15 @@ class ProductAnalytics(ORMBase):
     product_name: str
     product_code: str
     brand_name: str
-    sell_in_quantity: int
-    sell_through_quantity: int
     turnover_rate: float
     total_revenue: Decimal
     current_stock: int
 
 class OverallAnalytics(ORMBase):
-    total_sell_in: int
-    total_sell_through: int
     average_turnover_rate: float
     total_revenue: Decimal
+    total_products: int
+    active_products: int
+    total_brands: int
+    total_categories: int
+    total_distributors: int

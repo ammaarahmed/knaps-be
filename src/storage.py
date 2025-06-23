@@ -1,19 +1,16 @@
-from typing import List, Optional
+from typing import List, Optional, Literal
 from sqlalchemy import select
-from .database import AsyncSessionLocal
-from .db_models import ProductModel, SellInModel, SellThroughModel
+from .database import get_async_session
+from .db_models import ProductModel, DealsModel
 from .models import (
+    BaseDeal,
     Product,
     InsertProduct,
-    UpdateProduct,
-    SellIn,
-    InsertSellIn,
-    SellThrough,
-    InsertSellThrough,
     ProductAnalytics,
     OverallAnalytics,
 )
 import logging 
+import uuid
 
 logger = logging.getLogger('uvicorn.error')
 
@@ -28,18 +25,25 @@ def to_schema(obj, schema_cls):
 class SQLStorage:
     # Product operations
     async def get_products(self) -> List[Product]:
-        async with AsyncSessionLocal() as session:
+        async with get_async_session() as session:
             result = await session.execute(select(ProductModel))
             return [to_schema(row, Product) for row in result.scalars().all()]
 
     async def get_product(self, pid: int) -> Optional[Product]:
-        async with AsyncSessionLocal() as session:
+        async with get_async_session() as session:
             result = await session.get(ProductModel, pid)
             return to_schema(result, Product) if result else None
 
     async def get_product_by_code(self, code: str) -> Optional[Product]:
-        async with AsyncSessionLocal() as session:
+        async with get_async_session() as session:
             stmt = select(ProductModel).where(ProductModel.product_code == code)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, Product) if row else None
+    
+    async def get_product_by_uuid(self, uuid: str) -> Optional[Product]:
+        async with get_async_session() as session:
+            stmt = select(ProductModel).where(ProductModel.uuid == uuid)
             result = await session.execute(stmt)
             row = result.scalar_one_or_none()
             return to_schema(row, Product) if row else None
@@ -47,7 +51,7 @@ class SQLStorage:
     async def search_products(self, query: str) -> List[Product]:
         q = f"%{query.lower()}%"
         logger.info(f"Printing query {q}")
-        async with AsyncSessionLocal() as session:
+        async with get_async_session() as session:
             stmt = select(ProductModel).where(
                 (ProductModel.product_name.ilike(q))
                 | (ProductModel.product_code.ilike(q))
@@ -58,15 +62,17 @@ class SQLStorage:
             return [to_schema(p, Product) for p in result.scalars().all()]
 
     async def create_product(self, data: InsertProduct) -> Product:
-        async with AsyncSessionLocal() as session:
-            obj = ProductModel(**data.dict())
+        async with get_async_session() as session:
+            product_data = data.dict()
+            product_data['uuid'] = str(uuid.uuid4())
+            obj = ProductModel(**product_data)
             session.add(obj)
             await session.commit()
             await session.refresh(obj)
             return to_schema(obj, Product)
 
     async def update_product(self, pid: int, data: dict) -> Optional[Product]:
-        async with AsyncSessionLocal() as session:
+        async with get_async_session() as session:
             obj = await session.get(ProductModel, pid)
             if not obj:
                 return None
@@ -77,7 +83,7 @@ class SQLStorage:
             return to_schema(obj, Product)
 
     async def delete_product(self, pid: int) -> bool:
-        async with AsyncSessionLocal() as session:
+        async with get_async_session() as session:
             obj = await session.get(ProductModel, pid)
             if not obj:
                 return False
@@ -85,108 +91,127 @@ class SQLStorage:
             await session.commit()
             return True
 
-    # SellIn operations
-    async def get_sell_ins(
-        self, product_id: Optional[int] = None, month: Optional[str] = None
-    ) -> List[SellIn]:
-        async with AsyncSessionLocal() as session:
-            stmt = select(SellInModel)
-            if product_id is not None:
-                stmt = stmt.where(SellInModel.product_id == product_id)
-            if month:
-                stmt = stmt.where(SellInModel.month_partition == month)
-            result = await session.execute(stmt)
-            return [to_schema(s, SellIn) for s in result.scalars().all()]
-
-    async def create_sell_in(self, data: InsertSellIn) -> SellIn:
-        async with AsyncSessionLocal() as session:
-            obj = SellInModel(**data.dict())
+    # Deal operations
+    async def create_deal(self, data: BaseDeal) -> BaseDeal:
+        async with get_async_session() as session:
+            deal_data = data.dict()
+            deal_data['uuid'] = str(uuid.uuid4())
+            obj = DealsModel(**deal_data)
             session.add(obj)
             await session.commit()
             await session.refresh(obj)
-            return to_schema(obj, SellIn)
+            return to_schema(obj, BaseDeal)
 
-    # SellThrough operations
-    async def get_sell_throughs(
-        self, product_id: Optional[int] = None, month: Optional[str] = None
-    ) -> List[SellThrough]:
-        async with AsyncSessionLocal() as session:
-            stmt = select(SellThroughModel)
-            if product_id is not None:
-                stmt = stmt.where(SellThroughModel.product_id == product_id)
-            if month:
-                stmt = stmt.where(SellThroughModel.month_partition == month)
-            result = await session.execute(stmt)
-            return [to_schema(s, SellThrough) for s in result.scalars().all()]
-
-    async def create_sell_through(self, data: InsertSellThrough) -> SellThrough:
-        async with AsyncSessionLocal() as session:
-            obj = SellThroughModel(**data.dict())
-            session.add(obj)
+    async def update_deal(self, uuid: str, data: BaseDeal) -> BaseDeal:
+        async with get_async_session() as session:
+            obj = await session.get(DealsModel, uuid)
+            if not obj:
+                return None
+            for k, v in data.dict().items():
+                setattr(obj, k, v)
             await session.commit()
             await session.refresh(obj)
-            return to_schema(obj, SellThrough)
+            return to_schema(obj, BaseDeal)
+
+    async def delete_deal(self, uuid: str) -> bool:
+        async with get_async_session() as session:
+            obj = await session.get(DealsModel, uuid)
+            if not obj:
+                return False
+            await session.delete(obj)
+            await session.commit()
+            return True 
+        
+    async def get_deals(
+        self, product_uuid: Optional[str] = None, product_code: Optional[str] = None, month: Optional[str] = None
+    ) -> List[BaseDeal]:
+        async with get_async_session() as session:
+            stmt = select(DealsModel)
+            if product_uuid is not None: 
+                stmt = stmt.where(DealsModel.product_uuid == product_uuid)
+            if product_code is not None:
+                stmt = stmt.where(DealsModel.product_code == product_code)
+            if month:
+                stmt = stmt.where(DealsModel.yeamonth_partition == month)
+            result = await session.execute(stmt)
+            return [to_schema(s, BaseDeal) for s in result.scalars().all()]
+
+    async def get_by_specific_dealtype(self,
+        deal_type: Literal['sell_in', 'sell_through', 'price_protection', 'off_invoice_discount'],
+        product_code: Optional[int] = None, 
+        yearmonth: Optional[str] = None, 
+    ) -> List[BaseDeal]:
+        async with get_async_session() as session:
+            stmt = select(DealsModel)
+            if product_code is not None:
+                stmt = stmt.where(DealsModel.product_code == product_code)
+            if yearmonth:
+                stmt = stmt.where(DealsModel.yeamonth_partition == yearmonth)
+            if deal_type:
+                stmt = stmt.where(DealsModel.deal_type == deal_type)
+            result = await session.execute(stmt)
+            return [to_schema(s, BaseDeal) for s in result.scalars().all()]
+        
+    async def get_deal(self, uuid: str) -> BaseDeal:
+        async with get_async_session() as session:
+            result = await session.get(DealsModel, uuid)
+            return to_schema(result, BaseDeal) if result else None
+        
+    async def create_deals(self, data: List[BaseDeal]) -> List[BaseDeal]:
+        async with get_async_session() as session:
+            objs = []
+            for d in data:
+                deal_data = d.dict()
+                deal_data['uuid'] = str(uuid.uuid4())
+                objs.append(DealsModel(**deal_data))
+            session.add_all(objs)
+            await session.commit()
+            for obj in objs:
+                await session.refresh(obj)
+            return [to_schema(o, BaseDeal) for o in objs]   
 
     # Analytics operations
     async def get_product_analytics(
-        self, product_id: Optional[int] = None, month: Optional[str] = None
+        self, product_code: Optional[int] = None
     ) -> List[ProductAnalytics]:
-        async with AsyncSessionLocal() as session:
+        async with get_async_session() as session:
             prod_stmt = select(ProductModel)
-            if product_id is not None:
-                prod_stmt = prod_stmt.where(ProductModel.id == product_id)
+            if product_code is not None:
+                prod_stmt = prod_stmt.where(ProductModel.id == product_code)
             products = (await session.execute(prod_stmt)).scalars().all()
             analytics: List[ProductAnalytics] = []
             for p in products:
-                si_stmt = select(SellInModel).where(SellInModel.product_id == p.id)
-                st_stmt = select(SellThroughModel).where(
-                    SellThroughModel.product_id == p.id
-                )
-                if month:
-                    si_stmt = si_stmt.where(SellInModel.month_partition == month)
-                    st_stmt = st_stmt.where(SellThroughModel.month_partition == month)
-                sell_ins = (await session.execute(si_stmt)).scalars().all()
-                sell_throughs = (await session.execute(st_stmt)).scalars().all()
-                sell_in_qty = sum(si.quantity for si in sell_ins)
-                sell_through_qty = sum(st.quantity for st in sell_throughs)
-                total_revenue = sum(float(st.total_revenue) for st in sell_throughs)
-                current_stock = sell_in_qty - sell_through_qty
-                turnover_rate = (sell_through_qty / sell_in_qty * 100) if sell_in_qty else 0
-                logger.info(f"Product ID {p.id} and var type {type(p.id)}")
                 analytics.append(
                     ProductAnalytics(
                         product_id=p.id,
                         product_name=p.product_name,
                         product_code=p.product_code,
                         brand_name=p.brand_name,
-                        sell_in_quantity=sell_in_qty,
-                        sell_through_quantity=sell_through_qty,
-                        turnover_rate=round(turnover_rate, 1),
-                        total_revenue=total_revenue,
-                        current_stock=current_stock,
+                        turnover_rate=0.0,  # TODO: Calculate from deals data
+                        total_revenue=p.trade,  # TODO: Calculate from deals data
+                        current_stock=0,  # TODO: Get from inventory data
                     )
                 )
-            analytics.sort(key=lambda a: a.total_revenue, reverse=True)
+            analytics.sort(key=lambda a: a.product_name)
             return analytics
 
-    async def get_overall_analytics(self, month: Optional[str] = None) -> OverallAnalytics:
-        async with AsyncSessionLocal() as session:
-            si_stmt = select(SellInModel)
-            st_stmt = select(SellThroughModel)
-            if month:
-                si_stmt = si_stmt.where(SellInModel.month_partition == month)
-                st_stmt = st_stmt.where(SellThroughModel.month_partition == month)
-            sell_ins = (await session.execute(si_stmt)).scalars().all()
-            sell_throughs = (await session.execute(st_stmt)).scalars().all()
-            total_sell_in = sum(si.quantity for si in sell_ins)
-            total_sell_through = sum(st.quantity for st in sell_throughs)
-            total_revenue = sum(float(st.total_revenue) for st in sell_throughs)
-            avg_turnover = (total_sell_through / total_sell_in * 100) if total_sell_in else 0
+    async def get_overall_analytics(self) -> OverallAnalytics:
+        async with get_async_session() as session:
+            products = (await session.execute(select(ProductModel))).scalars().all()
+            total_products = len(products)
+            active_products = len([p for p in products if p.status == 'Active'])
+            total_brands = len(set(p.brand_name for p in products))
+            total_categories = len(set(p.category_name for p in products))
+            total_distributors = len(set(p.distributor_name for p in products))
+            
             return OverallAnalytics(
-                total_sell_in=total_sell_in,
-                total_sell_through=total_sell_through,
-                average_turnover_rate=round(avg_turnover, 1),
-                total_revenue=total_revenue,
+                average_turnover_rate=0.0,  # TODO: Calculate from deals data
+                total_revenue=sum(p.trade for p in products),  # TODO: Calculate from deals data
+                total_products=total_products,
+                active_products=active_products,
+                total_brands=total_brands,
+                total_categories=total_categories,
+                total_distributors=total_distributors,
             )
 
 

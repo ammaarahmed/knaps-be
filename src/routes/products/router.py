@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Response
 from typing import List
-from ...models import Product, InsertProduct, UpdateProduct
+from ...models import Product, InsertProduct
 from ...storage import storage
 import logging
 
@@ -19,9 +19,9 @@ async def search_products(q: str):
         return []
     return await storage.search_products(q)
 
-@router.get("/{product_id}", response_model=Product)
-async def get_product(product_id: int):
-    product = await storage.get_product(product_id)
+@router.get("/{product_code}", response_model=Product)
+async def get_product(product_code: str):
+    product = await storage.get_product_by_code(product_code)
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
@@ -33,16 +33,16 @@ async def create_product(data: InsertProduct):
         raise HTTPException(status_code=400, detail="Product code already exists")
     return await storage.create_product(data)
 
-@router.put("/{product_id}", response_model=Product)
-async def update_product(product_id: int, data: UpdateProduct):
-    product = await storage.update_product(product_id, data.dict(exclude_unset=True))
+@router.put("/{product_code}", response_model=Product)
+async def update_product(product_code: int, data: Product):
+    product = await storage.update_product(product_code, data.dict(exclude_unset=True))
     if not product:
         raise HTTPException(status_code=404, detail="Product not found")
     return product
 
-@router.delete("/{product_id}", status_code=204)
-async def delete_product(product_id: int):
-    deleted = await storage.delete_product(product_id)
+@router.delete("/{product_code}", status_code=204)
+async def delete_product(product_code: int):
+    deleted = await storage.delete_product(product_code)
     if not deleted:        
         raise HTTPException(status_code=404, detail="Product not found")
     return Response(status_code=204)
@@ -50,8 +50,8 @@ async def delete_product(product_id: int):
 @router.post("/bulk")
 async def bulk_create(products: List[InsertProduct]):
     logger.info("Starting bulk product upload")
-    results = []
-    errors = []
+    results: List[Product] = []
+    errors: List[str] = []
     for data in products:
         logger.info(f"Uploading {data.product_code}, product data {data}")
         try:

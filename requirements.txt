@@ -6,4 +6,5 @@ asyncpg
 aiosqlite
 httpx
 pydantic-settings
+pyjwt
 

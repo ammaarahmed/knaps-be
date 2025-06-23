@@ -1,4 +1,5 @@
 from datetime import datetime, date
+from decimal import Decimal
 from sqlalchemy import (Column, Integer, Text, Boolean, String, Numeric, DateTime, Date, ForeignKey)
 from sqlalchemy.orm import relationship
 
@@ -7,7 +8,8 @@ from .database import Base
 class ProductModel(Base):
     __tablename__ = "products"
 
-    id = Column(Integer, primary_key=True)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String, nullable=False, unique=True)
     distributor_name = Column(Text, nullable=False)
     brand_name = Column(Text, nullable=False)
     product_code = Column(Text, nullable=False, unique=True)
@@ -23,7 +25,7 @@ class ProductModel(Base):
     superceded_by = Column(Text)
     ean = Column(Text)
     pack_size = Column(Integer, nullable=False, default=1)
-    mwp = Column(Numeric(10, 2))
+    mwp = Column(Numeric(10, 2), nullable=False)
     trade = Column(Numeric(10, 2), nullable=False)
     go = Column(Numeric(10, 2))
     rrp = Column(Numeric(10, 2), nullable=False)
@@ -37,35 +39,32 @@ class ProductModel(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    sell_ins = relationship("SellInModel", back_populates="product")
-    sell_throughs = relationship("SellThroughModel", back_populates="product")
+    deals = relationship("DealsModel", back_populates="product")
 
-class SellInModel(Base):
-    __tablename__ = "sell_ins"
+class DealsModel(Base):
+    __tablename__ = "deals"
 
-    id = Column(Integer, primary_key=True)
-    product_id = Column(String, ForeignKey("products.id"), nullable=False)
-    quantity = Column(Integer, nullable=False)
-    unit_cost = Column(Numeric(10, 2), nullable=False)
-    total_cost = Column(Numeric(10, 2), nullable=False)
-    transaction_date = Column(Date, nullable=False)
-    month_partition = Column(String(7), nullable=False)
-    notes = Column(Text)
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    uuid = Column(String, nullable=False, unique=True)
+    product_id = Column(Integer, ForeignKey("products.id"), nullable=False)
+    deal_type = Column(String, nullable=False, default="sell_in")
+    deal_id = Column(Integer, nullable=False)  
+    amount_type = Column(String, nullable=False, default="quantity")
+    amount = Column(Numeric, nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    yeamonth_partition = Column(String(7), nullable=False)
+    provider = Column(String, nullable=False, default="head office")
+    store_amount = Column(Numeric)
+    head_office_amount = Column(Numeric)
+    trade_price = Column(Numeric)
     created_at = Column(DateTime, default=datetime.utcnow)
+    created_by = Column(String)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by = Column(String)
 
-    product = relationship("ProductModel", back_populates="sell_ins")
+    product = relationship("ProductModel", back_populates="deals")
 
-class SellThroughModel(Base):
-    __tablename__ = "sell_throughs"
 
-    id = Column(Integer, primary_key=True)
-    product_id = Column(String, ForeignKey("products.id"), nullable=False)
-    quantity = Column(Integer, nullable=False)
-    unit_price = Column(Numeric(10, 2), nullable=False)
-    total_revenue = Column(Numeric(10, 2), nullable=False)
-    transaction_date = Column(Date, nullable=False)
-    month_partition = Column(String(7), nullable=False)
-    customer_info = Column(Text)
-    created_at = Column(DateTime, default=datetime.utcnow)
 
-    product = relationship("ProductModel", back_populates="sell_throughs")
+

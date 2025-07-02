@@ -10,9 +10,9 @@ from .config import settings
 import logging, yaml
 
 from .routes.products.router import router as products_router
-from .routes.deals.router import router as deals_router
 from .routes.analytics.router import router as analytics_router
 from .routes.auth.router import router as auth_router
+from .routes.rebates.router import router as rebates_router
 from .models import User, Token
 
 
@@ -66,9 +66,9 @@ app.add_middleware(
 )
 
 app.include_router(products_router)
-app.include_router(deals_router)
 app.include_router(analytics_router)
 app.include_router(auth_router)
+app.include_router(rebates_router)
 
 class UserInDB(User):
     hashed_password: str
@@ -131,7 +131,7 @@ async def get_current_active_user(
 
 @app.on_event("startup")
 async def startup():
-    await init_db()
+    await init_db(load_ctc_data=True)
 
 
 @app.get("/")

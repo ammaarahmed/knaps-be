@@ -1,10 +1,13 @@
 fastapi
 uvicorn[standard]
 gunicorn
-sqlalchemy
+sqlalchemy[asyncio]
 asyncpg
 aiosqlite
 httpx
 pydantic-settings
 pyjwt
-
+pandas 
+numpy
+alembic
+requests

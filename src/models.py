@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Literal, Optional, Union
+from typing import Literal, Optional, Union, List
 from decimal import Decimal
 from datetime import datetime, date
 from uuid import UUID, uuid4
@@ -38,6 +38,24 @@ class Token(ORMBase):
     access_token: str
     token_type: str
 
+# Price Level models
+class PriceLevel(ORMBase):
+    id: Optional[int] = None
+    price_level: str  # e.g., "MWP", "Trade", "GO", "RRP"
+    type: str  # e.g., "Standard", "Promotional", "Bulk", etc.
+    value_excl: Decimal  # Value excluding tax
+    value_incl: Optional[Decimal] = None  # Value including tax
+    comments: Optional[str] = None  # Additional comments about this price level
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+class InsertPriceLevel(ORMBase):
+    price_level: str
+    type: str
+    value_excl: Decimal
+    value_incl: Optional[Decimal] = None
+    comments: Optional[str] = None
+
 # Product models
 class InsertProduct(ORMBase):
     distributor_name: str
@@ -55,10 +73,7 @@ class InsertProduct(ORMBase):
     superceded_by: Optional[str] = None
     ean: Optional[str] = None
     pack_size: int = 1
-    mwp: Optional[Decimal] = None
-    trade: Decimal
-    go: Optional[Decimal] = None
-    rrp: Decimal
+    price_levels: List[InsertPriceLevel] = []
     core_group: Optional[str] = None
     tax_exmt: bool = False
     hyperlink: Optional[str] = None
@@ -84,10 +99,7 @@ class Product(ORMBase):
     superceded_by: Optional[str] = None
     ean: Optional[str] = None
     pack_size: Optional[int] = None
-    mwp: Optional[Decimal] = None
-    trade: Optional[Decimal] = None
-    go: Optional[Decimal] = None
-    rrp: Optional[Decimal] = None
+    price_levels: Optional[List[PriceLevel]] = None
     core_group: Optional[str] = None
     tax_exmt: Optional[bool] = None
     hyperlink: Optional[str] = None
@@ -96,27 +108,59 @@ class Product(ORMBase):
     badges_codes: Optional[str] = None
     stock_unmanaged: Optional[bool] = None
 
-# SellThrough models
-class BaseDeal(ORMBase):
-    deal_id: Optional[int] = None
-    deal_uuid: Optional[UUID] = None
-    deal_code: Optional[str] = None
-    deal_type: Literal['sell_in', 'sell_through', 'price_protection', 'off_invoice_discount']
-    product_id: int
-    product_uuid: UUID = Field(default_factory=uuid4)
-    amount_type: Literal['quantity', 'value']
-    amount: Decimal
-    start_date: date 
+# Rebate models
+
+class RebateTierCreate(ORMBase):
+    rebate_agreement_uuid: Optional[str] = None
+    from_quantity: Optional[float] = None
+    to_quantity: Optional[float] = None  # None if open-ended
+    from_amount: Optional[float] = None
+    to_amount: Optional[float] = None  # None if open-ended
+    rebate_value: float         # percentage or per-unit amount
+    rebate_unit: Literal["percentage", "per_unit", "fixed"]
+
+class RebateAgreementCreate(ORMBase):
+    agreement_type: Literal["vendor", "customer"]
+    distributor_id: int  # vendor ID or customer ID 
+    description: str  # Changed from 'name' to match database schema
+    start_date: date
     end_date: date
-    yeamonth_partition: str = Field(..., min_length=7, max_length=7)
-    provider: Literal['head office', 'distributor', 'narta']
-    store_amount: Optional[Decimal] = None
-    head_office_amount: Optional[Decimal] = None
-    trade_price: Optional[Decimal] = None
-    created_at: Optional[datetime] = None
-    created_by: Optional[str] = None
-    updated_at: Optional[datetime] = None
-    updated_by: Optional[str] = None
+    calc_frequency: Literal["invoice", "daily", "monthly", "quarterly", "yearly"]  # Added 'daily', kept 'invoice'
+    basis: Literal["quantity", "amount"] 
+    rate_type: Literal["percentage", "per_unit", "fixed"]
+    approval_required: bool = False
+    products: List[int] = []           # product IDs this agreement applies to
+    product_category_ids: List[int] = []  # alternatively or additionally, categories
+    tiers: List[RebateTierCreate] = []  # tier definitions (if any)
+
+class RebateTierRead(ORMBase):
+    id: int
+    uuid: str
+    agreement_id: int
+    rebate_agreement_uuid: str
+    from_quantity: Optional[float] = None
+    to_quantity: Optional[float] = None  # None if open-ended
+    from_amount: Optional[float] = None
+    to_amount: Optional[float] = None  # None if open-ended
+    rebate_value: float         # percentage or per-unit amount
+    rebate_unit: Literal["percentage", "per_unit", "fixed"]
+
+class RebateAgreementRead(ORMBase):
+    id: int
+    uuid: str
+    agreement_type: str 
+    distributor_id: int 
+    description: str  # Changed from 'name' to match database schema
+    start_date: date 
+    end_date: date 
+    calc_frequency: str 
+    basis: str 
+    rate_type: str 
+    approval_required: bool 
+    products: List[int] 
+    product_category_ids: List[int] 
+    tiers: List[RebateTierRead] 
+    status: str
 
 
 # Analytics types
@@ -137,3 +181,60 @@ class OverallAnalytics(ORMBase):
     total_brands: int
     total_categories: int
     total_distributors: int
+
+class CategoryAttributeSchema(ORMBase):
+    id: Optional[int]
+    name: str
+    unit: Optional[str] = None
+    value: str
+
+
+class ProductCategorySchema(ORMBase):
+    id: int
+    active: bool
+    modified_by: str
+    modified: datetime
+    created_by: str
+    created: datetime
+    deleted_by: Optional[str]
+    deleted: Optional[datetime]
+    code: str
+    name: str
+    store: str
+    product_type_id: int
+    attributes: List[CategoryAttributeSchema] = []
+
+    class Config:
+        orm_mode = True
+
+
+class ProductTypeSchema(ORMBase):
+    id: int
+    active: bool
+    modified_by: str
+    modified: datetime
+    created_by: str
+    created: datetime
+    deleted_by: Optional[str]
+    deleted: Optional[datetime]
+    code: str
+    name: str
+    store: str
+    product_class_id: int
+    categories: List[ProductCategorySchema] = []
+
+
+class ProductClassSchema(ORMBase):
+    id: int
+    active: bool
+    modified_by: str
+    modified: datetime
+    created_by: str
+    created: datetime
+    deleted_by: Optional[str]
+    deleted: Optional[datetime]
+    code: str
+    name: str
+    store: str
+    types: List[ProductTypeSchema] = []
+

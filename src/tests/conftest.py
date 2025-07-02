@@ -9,8 +9,8 @@ _db_fd, _db_path = tempfile.mkstemp(prefix="test_db", suffix=".db")
 os.close(_db_fd)
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
 
-from python_server.main import app
-from python_server.database import init_db
+from src.main import app
+from src.database import init_db
 
 @pytest.fixture(scope="session", autouse=True)
 async def setup_database():

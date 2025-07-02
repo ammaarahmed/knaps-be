@@ -10,8 +10,20 @@ async def test_product_crud(client):
         "product_code": "P1",
         "product_name": "Prod1",
         "category_name": "Cat",
-        "trade": 10.0,
-        "rrp": 12.0
+        "price_levels": [
+            {
+                "price_level": "Trade",
+                "type": "Standard",
+                "value_excl": 10.0,
+                "value_incl": 11.0
+            },
+            {
+                "price_level": "RRP",
+                "type": "Standard",
+                "value_excl": 12.0,
+                "value_incl": 13.2
+            }
+        ]
     }
     resp = await client.post("/products", json=product)
     assert resp.status_code == 201
@@ -52,8 +64,20 @@ async def test_bulk_and_related(client):
         "distributor_name": "d",
         "brand_name": "b",
         "category_name": "c",
-        "trade": 5.0,
-        "rrp": 6.0,
+        "price_levels": [
+            {
+                "price_level": "Trade",
+                "type": "Standard",
+                "value_excl": 5.0,
+                "value_incl": 5.5
+            },
+            {
+                "price_level": "RRP",
+                "type": "Standard",
+                "value_excl": 6.0,
+                "value_incl": 6.6
+            }
+        ]
     }
     # bulk create two products, second has duplicate code
     data = [

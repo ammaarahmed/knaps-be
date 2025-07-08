@@ -1,9 +1,18 @@
 import asyncio
-from typing import List, Optional, Literal
-from sqlalchemy import select, text
-from sqlalchemy.orm import joinedload
+from typing import List, Optional, Literal, Dict, Any, Union, Tuple
+from sqlalchemy import select, text, and_, or_, func, desc, asc
+from sqlalchemy.orm import joinedload, selectinload
+from datetime import datetime
 from .database import get_async_session
-from .db_models import ProductModel, User, PriceLevel, RebateAgreement, RebateAgreementProduct, RebateTier, RebateClaim, CTCCategory
+from .db_models import (
+    ProductModel, User, PriceLevel, RebateAgreement, RebateAgreementProduct, 
+    RebateTier, RebateClaim,
+    # New CTC models
+    CTCClass, CTCType, CTCCategory, CTCAttributeGroup, CTCDataType, 
+    CTCUnitOfMeasure, CTCAttribute, CategoryAttribute,
+    # Distributor and Brand models
+    Distributor, Brand
+)
 from .models import (
     Product,
     InsertProduct,
@@ -12,21 +21,88 @@ from .models import (
     RebateAgreementCreate,
     RebateAgreementRead,
     RebateTierCreate,
+    DistributorCreate,
+    DistributorRead,
+    DistributorUpdate,
+    BrandCreate,
+    BrandRead,
+    BrandUpdate,
+    ProductCreateResult,
+    FuzzyMatchInfo,
+    BulkProductCreateResult,
 )
 import logging 
 import uuid
 import json
 import pandas as pd
 from decimal import Decimal
+from difflib import SequenceMatcher
+import re
 
 logger = logging.getLogger('uvicorn.error')
 
+def to_schema(self, obj, schema):
+        return schema(**obj.model_dump())
 
-def to_schema(obj, schema_cls):
-    if hasattr(schema_cls, "model_validate"):
-        logger.debug(f"Model {obj} or {schema_cls}")
-        return schema_cls.model_validate(obj, from_attributes=True)
-    return schema_cls.from_orm(obj)
+def normalize_name(name: str) -> str:
+    """Normalize a name for comparison by removing extra spaces and converting to lowercase"""
+    if not name:
+        return ""
+    # Remove extra whitespace and convert to lowercase
+    return re.sub(r'\s+', ' ', name.strip().lower())
+
+
+def calculate_similarity(name1: str, name2: str) -> float:
+    """Calculate similarity between two names using SequenceMatcher"""
+    if not name1 or not name2:
+        return 0.0
+    
+    # Normalize both names
+    norm1 = normalize_name(name1)
+    norm2 = normalize_name(name2)
+    
+    # Use SequenceMatcher for similarity calculation
+    return SequenceMatcher(None, norm1, norm2).ratio()
+
+
+def find_best_match(input_name: str, candidates: List[Tuple[str, Any]], threshold: float = 0.8) -> Tuple[Optional[Any], float, List[str]]:
+    """
+    Find the best match for an input name among candidates.
+    
+    Args:
+        input_name: The name to match
+        candidates: List of tuples (name, object) to search through
+        threshold: Minimum similarity score to consider a match (0.0 to 1.0)
+    
+    Returns:
+        Tuple of (best_match_object, similarity_score, suggestions)
+    """
+    if not candidates:
+        return None, 0.0, []
+    
+    # Calculate similarity for all candidates
+    similarities = []
+    for candidate_name, candidate_obj in candidates:
+        similarity = calculate_similarity(input_name, candidate_name)
+        similarities.append((similarity, candidate_name, candidate_obj))
+    
+    # Sort by similarity (highest first)
+    similarities.sort(key=lambda x: x[0], reverse=True)
+    
+    best_similarity, best_name, best_obj = similarities[0]
+    
+    # If best match is above threshold, return it
+    if best_similarity >= threshold:
+        # Generate suggestions (other close matches)
+        suggestions = [name for sim, name, _ in similarities[1:4] if sim >= 0.6]
+        return best_obj, best_similarity, suggestions
+    
+    # If no good match, return suggestions
+    suggestions = [name for sim, name, _ in similarities[:3] if sim >= 0.3]
+    return None, best_similarity, suggestions
+
+
+
 
 
 class SQLStorage:
@@ -68,28 +144,206 @@ class SQLStorage:
             result = await session.execute(stmt)
             return [to_schema(p, Product) for p in result.scalars().all()]
 
-    async def create_product(self, data: InsertProduct) -> Product:
+    async def get_brand_by_name(self, name: str) -> Optional[BrandRead]:
+        """Find brand by exact name match (case-insensitive)"""
         async with get_async_session() as session:
-            product_data = data.dict()
+            stmt = select(Brand).where(Brand.name.ilike(name))
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, BrandRead) if row else None
+
+    async def get_distributor_by_name(self, name: str) -> Optional[DistributorRead]:
+        """Find distributor by exact name match (case-insensitive)"""
+        async with get_async_session() as session:
+            stmt = select(Distributor).where(Distributor.name.ilike(name))
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, DistributorRead) if row else None
+
+    async def find_brand_with_fuzzy_matching(self, brand_name: str, threshold: float = 0.8) -> Tuple[Optional[BrandRead], float, List[str]]:
+        """
+        Find brand using fuzzy matching with suggestions.
+        
+        Returns:
+            Tuple of (brand_object, similarity_score, suggestions)
+        """
+        async with get_async_session() as session:
+            # Get all brands
+            stmt = select(Brand)
+            result = await session.execute(stmt)
+            brands = result.scalars().all()
+            
+            # Convert to list of (name, brand_object) tuples
+            candidates = [(brand.name, brand) for brand in brands]
+            
+            # Find best match
+            best_match, similarity, suggestions = find_best_match(brand_name, candidates, threshold)
+            
+            if best_match:
+                return to_schema(best_match, BrandRead), similarity, suggestions
+            else:
+                return None, similarity, suggestions
+
+    async def find_distributor_with_fuzzy_matching(self, distributor_name: str, threshold: float = 0.8) -> Tuple[Optional[DistributorRead], float, List[str]]:
+        """
+        Find distributor using fuzzy matching with suggestions.
+        
+        Returns:
+            Tuple of (distributor_object, similarity_score, suggestions)
+        """
+        async with get_async_session() as session:
+            # Get all distributors
+            stmt = select(Distributor)
+            result = await session.execute(stmt)
+            distributors = result.scalars().all()
+            
+            # Convert to list of (name, distributor_object) tuples
+            candidates = [(distributor.name, distributor) for distributor in distributors]
+            
+            # Find best match
+            best_match, similarity, suggestions = find_best_match(distributor_name, candidates, threshold)
+            
+            if best_match:
+                return to_schema(best_match, DistributorRead), similarity, suggestions
+            else:
+                return None, similarity, suggestions
+
+    async def get_brand_by_name(self, name: str) -> Optional[BrandRead]:
+        """Find brand by exact name match (case-insensitive)"""
+        async with get_async_session() as session:
+            stmt = select(Brand).where(Brand.name.ilike(name))
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, BrandRead) if row else None
+
+    async def get_distributor_by_name(self, name: str) -> Optional[DistributorRead]:
+        """Find distributor by exact name match (case-insensitive)"""
+        async with get_async_session() as session:
+            stmt = select(Distributor).where(Distributor.name.ilike(name))
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, DistributorRead) if row else None
+
+    async def find_brand_with_fuzzy_matching(self, brand_name: str, threshold: float = 0.8) -> Tuple[Optional[BrandRead], float, List[str]]:
+        """
+        Find brand using fuzzy matching with suggestions.
+        
+        Returns:
+            Tuple of (brand_object, similarity_score, suggestions)
+        """
+        async with get_async_session() as session:
+            # Get all brands
+            stmt = select(Brand)
+            result = await session.execute(stmt)
+            brands = result.scalars().all()
+            
+            # Convert to list of (name, brand_object) tuples
+            candidates = [(brand.name, brand) for brand in brands]
+            
+            # Find best match
+            best_match, similarity, suggestions = find_best_match(brand_name, candidates, threshold)
+            
+            if best_match:
+                return to_schema(best_match, BrandRead), similarity, suggestions
+            else:
+                return None, similarity, suggestions
+
+    async def find_distributor_with_fuzzy_matching(self, distributor_name: str, threshold: float = 0.8) -> Tuple[Optional[DistributorRead], float, List[str]]:
+        """
+        Find distributor using fuzzy matching with suggestions.
+        
+        Returns:
+            Tuple of (distributor_object, similarity_score, suggestions)
+        """
+        async with get_async_session() as session:
+            # Get all distributors
+            stmt = select(Distributor)
+            result = await session.execute(stmt)
+            distributors = result.scalars().all()
+            
+            # Convert to list of (name, distributor_object) tuples
+            candidates = [(distributor.name, distributor) for distributor in distributors]
+            
+            # Find best match
+            best_match, similarity, suggestions = find_best_match(distributor_name, candidates, threshold)
+            
+            if best_match:
+                return to_schema(best_match, DistributorRead), similarity, suggestions
+            else:
+                return None, similarity, suggestions
+
+    async def create_product(self, data: InsertProduct) -> ProductCreateResult:
+        fuzzy_matches = []
+        async with get_async_session() as session:
+            # Distributor matching
+            stmt = select(Distributor)
+            result = await session.execute(stmt)
+            distributors = result.scalars().all()
+            distributor = None
+            normalized_input = normalize_name(data.distributor_name)
+            for d in distributors:
+                if normalize_name(d.name) == normalized_input:
+                    distributor = d
+                    break
+            if not distributor:
+                # Fuzzy match
+                candidates = [(d.name, d) for d in distributors]
+                best, sim, _ = find_best_match(data.distributor_name, candidates, 0.8)
+                if best:
+                    logger.warning(f"Fuzzy match for distributor: '{data.distributor_name}' -> '{best.name}' (sim={sim:.2f})")
+                    distributor = best
+                    fuzzy_matches.append(FuzzyMatchInfo(
+                        is_fuzzy=True, field='distributor',
+                        input_value=data.distributor_name,
+                        matched_value=best.name, similarity=sim
+                    ))
+                else:
+                    return ProductCreateResult(product=None, fuzzy_matches=[], error=f"Distributor '{data.distributor_name}' not found")
+
+            # Brand matching
+            stmt = select(Brand)
+            result = await session.execute(stmt)
+            brands = result.scalars().all()
+            brand = None
+            normalized_input = normalize_name(data.brand_name)
+            for b in brands:
+                if normalize_name(b.name) == normalized_input:
+                    brand = b
+                    break
+            if not brand:
+                candidates = [(b.name, b) for b in brands]
+                best, sim, _ = find_best_match(data.brand_name, candidates, 0.8)
+                if best:
+                    logger.warning(f"Fuzzy match for brand: '{data.brand_name}' -> '{best.name}' (sim={sim:.2f})")
+                    brand = best
+                    fuzzy_matches.append(FuzzyMatchInfo(
+                        is_fuzzy=True, field='brand',
+                        input_value=data.brand_name,
+                        matched_value=best.name, similarity=sim
+                    ))
+                else:
+                    return ProductCreateResult(product=None, fuzzy_matches=fuzzy_matches, error=f"Brand '{data.brand_name}' not found")
+
+            # Verify brand belongs to distributor
+            if brand.distributor_id != distributor.id:
+                return ProductCreateResult(product=None, fuzzy_matches=fuzzy_matches, error=f"Brand '{data.brand_name}' does not belong to distributor '{data.distributor_name}'")
+
+            product_data = data.model_dump()
             price_levels_data = product_data.pop('price_levels', [])
             product_data['uuid'] = str(uuid.uuid4())
-            
-            # Create the product
+            product_data['distributor_id'] = distributor.id
+            product_data['brand_id'] = brand.id
+            product_data.pop('distributor_name', None)
+            product_data.pop('brand_name', None)
             obj = ProductModel(**product_data)
             session.add(obj)
-            await session.flush()  # Flush to get the product ID
-            
-            # Create price levels
+            await session.flush()
             for price_level_data in price_levels_data:
-                price_level = PriceLevel(
-                    product_id=obj.id,
-                    **price_level_data
-                )
+                price_level = PriceLevel(product_id=obj.id, **price_level_data)
                 session.add(price_level)
-            
             await session.commit()
             await session.refresh(obj)
-            return to_schema(obj, Product)
+            return ProductCreateResult(product=to_schema(obj, Product), fuzzy_matches=fuzzy_matches)
 
     async def update_product(self, pid: int, data: dict) -> Optional[Product]:
         async with get_async_session() as session:
@@ -110,6 +364,164 @@ class SQLStorage:
             await session.delete(obj)
             await session.commit()
             return True
+    
+
+
+    # Distributor operations
+    async def get_distributors(self) -> List[DistributorRead]:
+        async with get_async_session() as session:
+            result = await session.execute(select(Distributor))
+            return [to_schema(row, DistributorRead) for row in result.scalars().all()]
+
+    async def get_distributor(self, distributor_id: int) -> Optional[DistributorRead]:
+        async with get_async_session() as session:
+            result = await session.get(Distributor, distributor_id)
+            return to_schema(result, DistributorRead) if result else None
+
+    async def get_distributor_by_uuid(self, uuid: str) -> Optional[DistributorRead]:
+        async with get_async_session() as session:
+            stmt = select(Distributor).where(Distributor.uuid == uuid)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, DistributorRead) if row else None
+
+    async def get_distributor_by_code(self, code: str) -> Optional[DistributorRead]:
+        async with get_async_session() as session:
+            stmt = select(Distributor).where(Distributor.code == code)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, DistributorRead) if row else None
+
+    async def create_distributor(self, data: DistributorCreate) -> DistributorRead:
+        async with get_async_session() as session:
+            distributor_data = data.model_dump()
+            distributor_data['uuid'] = str(uuid.uuid4())
+            distributor_data['modified'] = datetime.utcnow()
+            distributor_data['created'] = datetime.utcnow()
+            
+            obj = Distributor(**distributor_data)
+            session.add(obj)
+            await session.commit()
+            await session.refresh(obj)
+            return to_schema(obj, DistributorRead)
+
+    async def update_distributor(self, distributor_id: int, data: DistributorUpdate) -> Optional[DistributorRead]:
+        async with get_async_session() as session:
+            obj = await session.get(Distributor, distributor_id)
+            if not obj:
+                return None
+            
+            update_data = data.model_dump(exclude_unset=True)
+            update_data['modified'] = datetime.utcnow()
+            
+            for k, v in update_data.items():
+                setattr(obj, k, v)
+            
+            await session.commit()
+            await session.refresh(obj)
+            return to_schema(obj, DistributorRead)
+
+    async def delete_distributor(self, distributor_id: int) -> bool:
+        async with get_async_session() as session:
+            obj = await session.get(Distributor, distributor_id)
+            if not obj:
+                return False
+            await session.delete(obj)
+            await session.commit()
+            return True
+
+    async def search_distributors(self, query: str) -> List[DistributorRead]:
+        """Search distributors by name, code, or store"""
+        q = f"%{query.lower()}%"
+        async with get_async_session() as session:
+            stmt = select(Distributor).where(
+                (Distributor.name.ilike(q))
+                | (Distributor.code.ilike(q))
+                | (Distributor.store.ilike(q))
+            )
+            result = await session.execute(stmt)
+            return [to_schema(row, DistributorRead) for row in result.scalars().all()]
+
+    # Brand operations
+    async def get_brands(self) -> List[BrandRead]:
+        async with get_async_session() as session:
+            result = await session.execute(select(Brand))
+            return [to_schema(row, BrandRead) for row in result.scalars().all()]
+
+    async def get_brand(self, brand_id: int) -> Optional[BrandRead]:
+        async with get_async_session() as session:
+            result = await session.get(Brand, brand_id)
+            return to_schema(result, BrandRead) if result else None
+
+    async def get_brand_by_uuid(self, uuid: str) -> Optional[BrandRead]:
+        async with get_async_session() as session:
+            stmt = select(Brand).where(Brand.uuid == uuid)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, BrandRead) if row else None
+
+    async def get_brand_by_code(self, code: str) -> Optional[BrandRead]:
+        async with get_async_session() as session:
+            stmt = select(Brand).where(Brand.code == code)
+            result = await session.execute(stmt)
+            row = result.scalar_one_or_none()
+            return to_schema(row, BrandRead) if row else None
+
+    async def get_brands_by_distributor(self, distributor_id: int) -> List[BrandRead]:
+        async with get_async_session() as session:
+            stmt = select(Brand).where(Brand.distributor_id == distributor_id)
+            result = await session.execute(stmt)
+            return [to_schema(row, BrandRead) for row in result.scalars().all()]
+
+    async def create_brand(self, data: BrandCreate) -> BrandRead:
+        async with get_async_session() as session:
+            brand_data = data.model_dump()
+            brand_data['uuid'] = str(uuid.uuid4())
+            brand_data['modified'] = datetime.utcnow()
+            brand_data['created'] = datetime.utcnow()
+            
+            obj = Brand(**brand_data)
+            session.add(obj)
+            await session.commit()
+            await session.refresh(obj)
+            return to_schema(obj, BrandRead)
+
+    async def update_brand(self, brand_id: int, data: BrandUpdate) -> Optional[BrandRead]:
+        async with get_async_session() as session:
+            obj = await session.get(Brand, brand_id)
+            if not obj:
+                return None
+            
+            update_data = data.model_dump(exclude_unset=True)
+            update_data['modified'] = datetime.utcnow()
+            
+            for k, v in update_data.items():
+                setattr(obj, k, v)
+            
+            await session.commit()
+            await session.refresh(obj)
+            return to_schema(obj, BrandRead)
+
+    async def delete_brand(self, brand_id: int) -> bool:
+        async with get_async_session() as session:
+            obj = await session.get(Brand, brand_id)
+            if not obj:
+                return False
+            await session.delete(obj)
+            await session.commit()
+            return True
+
+    async def search_brands(self, query: str) -> List[BrandRead]:
+        """Search brands by name, code, or store"""
+        q = f"%{query.lower()}%"
+        async with get_async_session() as session:
+            stmt = select(Brand).where(
+                (Brand.name.ilike(q))
+                | (Brand.code.ilike(q))
+                | (Brand.store.ilike(q))
+            )
+            result = await session.execute(stmt)
+            return [to_schema(row, BrandRead) for row in result.scalars().all()]
 
     # Deal operations
 
@@ -183,7 +595,7 @@ class SQLStorage:
     
     async def create_user(self, data: User) -> User:
         async with get_async_session() as session:
-            obj = User(**data.dict())
+            obj = User(**data.model_dump())
             session.add(obj)
             await session.commit()
             await session.refresh(obj)
@@ -208,7 +620,7 @@ class SQLStorage:
             await self._check_overlapping_agreements(session, data)
             
             # Create the rebate agreement
-            agreement_data = data.dict()
+            agreement_data = data.model_dump()
             products = agreement_data.pop('products', [])
             product_category_ids = agreement_data.pop('product_category_ids', [])
             tiers = agreement_data.pop('tiers', [])
@@ -293,7 +705,7 @@ class SQLStorage:
                 self._validate_tier_ranges(data.tiers, data.basis)
             
             # Update agreement fields
-            agreement_data = data.dict()
+            agreement_data = data.model_dump()
             products = agreement_data.pop('products', [])
             product_category_ids = agreement_data.pop('product_category_ids', [])
             tiers = agreement_data.pop('tiers', [])
@@ -373,7 +785,7 @@ class SQLStorage:
     
     def _create_tier_from_data(self, tier_data: RebateTierCreate, agreement_id: int, agreement_uuid: str, basis: str) -> RebateTier:
         """Create a RebateTier database object from tier data, including UUIDs."""
-        tier_dict = tier_data.dict()
+        tier_dict = tier_data.model_dump()
         tier_dict['uuid'] = str(uuid.uuid4())
         tier_dict['rebate_agreement_uuid'] = agreement_uuid
         # Map rebate_value and rebate_unit to database fields
@@ -460,347 +872,86 @@ class SQLStorage:
             status=agreement.status
         )
 
-class CTCQueryHelper:
-    """Helper class for querying CTC categories."""
-    
-    async def get_all_classes(self) -> List[CTCCategory]:
-        """Get all product classes (level 1)."""
+    async def bulk_create_products(self, products: List[InsertProduct]) -> BulkProductCreateResult:
+        # Use pandas for fast filtering
+        import numpy as np
+        import pandas as pd
+        df = pd.DataFrame([p.model_dump() for p in products])
+        # Preload all brands and distributors
         async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.level == 1)
-            )
-            return result.scalars().all()
-    
-    async def get_types_by_class(self, class_id: int) -> List[CTCCategory]:
-        """Get all product types for a given class."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(
-                    CTCCategory.level == 2,
-                    CTCCategory.parent_id == class_id
-                )
-            )
-            return result.scalars().all()
-    
-    async def get_types_by_class_uuid(self, class_uuid: str) -> List[CTCCategory]:
-        """Get all product types for a given class using UUID."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(
-                    CTCCategory.level == 2,
-                    CTCCategory.parent_uuid == class_uuid
-                )
-            )
-            return result.scalars().all()
-    
-    async def get_categories_by_type(self, type_id: int) -> List[CTCCategory]:
-        """Get all product categories for a given type."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(
-                    CTCCategory.level == 3,
-                    CTCCategory.parent_id == type_id
-                )
-            )
-            return result.scalars().all()
-    
-    async def get_categories_by_type_uuid(self, type_uuid: str) -> List[CTCCategory]:
-        """Get all product categories for a given type using UUID."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(
-                    CTCCategory.level == 3,
-                    CTCCategory.parent_uuid == type_uuid
-                )
-            )
-            return result.scalars().all()
-    
-    async def get_full_hierarchy(self, class_id: Optional[int] = None) -> List[CTCCategory]:
-        """Get the full hierarchy for a class or all classes."""
-        async with get_async_session() as session:
-            if class_id:
-                # Get specific class with its full hierarchy
-                result = await session.execute(
-                    select(CTCCategory)
-                    .where(CTCCategory.id == class_id, CTCCategory.level == 1)
-                    .options(
-                        joinedload(CTCCategory.children).joinedload(CTCCategory.children)
-                    )
-                )
-                return result.scalar_one_or_none()
-            else:
-                # Get all classes with their hierarchies
-                result = await session.execute(
-                    select(CTCCategory)
-                    .where(CTCCategory.level == 1)
-                    .options(
-                        joinedload(CTCCategory.children).joinedload(CTCCategory.children)
-                    )
-                )
-                return result.scalars().all()
-    
-    async def get_full_hierarchy_by_uuid(self, class_uuid: str) -> Optional[CTCCategory]:
-        """Get the full hierarchy for a class using UUID."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory)
-                .where(CTCCategory.uuid == class_uuid, CTCCategory.level == 1)
-                .options(
-                    joinedload(CTCCategory.children).joinedload(CTCCategory.children)
-                )
-            )
-            return result.scalar_one_or_none()
-    
-    async def get_category_path(self, category_id: int) -> Optional[List[CTCCategory]]:
-        """Get the full path from root to a specific category."""
-        async with get_async_session() as session:
-            # Get the category
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.id == category_id)
-            )
-            category = result.scalar_one_or_none()
-            
-            if not category:
-                return None
-            
-            path = [category]
-            current = category
-            
-            # Walk up the hierarchy
-            while current.parent_id:
-                result = await session.execute(
-                    select(CTCCategory).where(CTCCategory.id == current.parent_id)
-                )
-                current = result.scalar_one_or_none()
-                if current:
-                    path.insert(0, current)
+            stmt = select(Distributor)
+            result = await session.execute(stmt)
+            distributors = result.scalars().all()
+            stmt = select(Brand)
+            result = await session.execute(stmt)
+            brands = result.scalars().all()
+        # Build lookup tables
+        distributor_lookup = {normalize_name(d.name): d for d in distributors}
+        brand_lookup = {normalize_name(b.name): b for b in brands}
+        # Fast vectorized normalization
+        df['normalized_distributor'] = df['distributor_name'].apply(normalize_name)
+        df['normalized_brand'] = df['brand_name'].apply(normalize_name)
+        # Find exact matches
+        df['distributor_obj'] = df['normalized_distributor'].map(distributor_lookup)
+        df['brand_obj'] = df['normalized_brand'].map(brand_lookup)
+        created = []
+        failed = []
+        for idx, row in df.iterrows():
+            data = InsertProduct(**{k: row[k] for k in InsertProduct.model_fields.keys() if k in row})
+            fuzzy_matches = []
+            distributor = row['distributor_obj']
+            brand = row['brand_obj']
+            # Fallback to fuzzy if not found
+            if distributor is None:
+                candidates = [(d.name, d) for d in distributors]
+                best, sim, _ = find_best_match(row['distributor_name'], candidates, 0.8)
+                if best:
+                    logger.warning(f"Fuzzy match for distributor: '{row['distributor_name']}' -> '{best.name}' (sim={sim:.2f})")
+                    distributor = best
+                    fuzzy_matches.append(FuzzyMatchInfo(
+                        is_fuzzy=True, field='distributor',
+                        input_value=row['distributor_name'],
+                        matched_value=best.name, similarity=sim
+                    ))
                 else:
-                    break
-            
-            return path
-    
-    async def get_category_path_by_uuid(self, category_uuid: str) -> Optional[List[CTCCategory]]:
-        """Get the full path from root to a specific category using UUID."""
-        async with get_async_session() as session:
-            # Get the category
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.uuid == category_uuid)
-            )
-            category = result.scalar_one_or_none()
-            
-            if not category:
-                return None
-            
-            path = [category]
-            current = category
-            
-            # Walk up the hierarchy using UUIDs
-            while current.parent_uuid:
-                result = await session.execute(
-                    select(CTCCategory).where(CTCCategory.uuid == current.parent_uuid)
-                )
-                current = result.scalar_one_or_none()
-                if current:
-                    path.insert(0, current)
+                    failed.append(ProductCreateResult(product=None, fuzzy_matches=[], error=f"Distributor '{row['distributor_name']}' not found"))
+                    continue
+            if brand is None:
+                candidates = [(b.name, b) for b in brands]
+                best, sim, _ = find_best_match(row['brand_name'], candidates, 0.8)
+                if best:
+                    logger.warning(f"Fuzzy match for brand: '{row['brand_name']}' -> '{best.name}' (sim={sim:.2f})")
+                    brand = best
+                    fuzzy_matches.append(FuzzyMatchInfo(
+                        is_fuzzy=True, field='brand',
+                        input_value=row['brand_name'],
+                        matched_value=best.name, similarity=sim
+                    ))
                 else:
-                    break
-            
-            return path
-    
-    async def search_categories(self, search_term: str, level: Optional[int] = None) -> List[CTCCategory]:
-        """Search categories by name or code."""
-        async with get_async_session() as session:
-            query = select(CTCCategory).where(
-                (CTCCategory.name.ilike(f'%{search_term}%')) |
-                (CTCCategory.code.ilike(f'%{search_term}%'))
-            )
-            
-            if level:
-                query = query.where(CTCCategory.level == level)
-            
-            result = await session.execute(query)
-            return result.scalars().all()
-    
-    async def get_products_by_category(self, category_id: int) -> List[ProductModel]:
-        """Get all products associated with a specific category."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(ProductModel)
-                .join(CTCCategory, ProductModel.id == CTCCategory.product_id)
-                .where(CTCCategory.id == category_id)
-            )
-            return result.scalars().all()
-    
-    async def get_products_by_category_uuid(self, category_uuid: str) -> List[ProductModel]:
-        """Get all products associated with a specific category using UUID."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(ProductModel)
-                .join(CTCCategory, ProductModel.id == CTCCategory.product_id)
-                .where(CTCCategory.uuid == category_uuid)
-            )
-            return result.scalars().all()
-    
-    async def get_categories_by_product(self, product_id: int) -> List[CTCCategory]:
-        """Get all categories associated with a specific product."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.product_id == product_id)
-            )
-            return result.scalars().all()
-    
-    async def get_statistics(self) -> dict:
-        """Get statistics about the CTC categories."""
-        async with get_async_session() as session:
-            stats = {}
-            
-            # Count by level
-            for level in [1, 2, 3]:
-                result = await session.execute(
-                    select(CTCCategory).where(CTCCategory.level == level)
-                )
-                count = len(result.scalars().all())
-                stats[f'level_{level}_count'] = count
-            
-            # Count active vs inactive
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.active == True)
-            )
-            active_count = len(result.scalars().all())
-            
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.active == False)
-            )
-            inactive_count = len(result.scalars().all())
-            
-            stats['active_count'] = active_count
-            stats['inactive_count'] = inactive_count
-            
-            # Count categories with products
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.product_id.isnot(None))
-            )
-            categories_with_products = len(result.scalars().all())
-            stats['categories_with_products'] = categories_with_products
-            
-            return stats
-    
-    async def get_category_by_code(self, code: str) -> Optional[CTCCategory]:
-        """Get a category by its code."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.code == code)
-            )
-            return result.scalar_one_or_none()
-    
-    async def get_category_by_id(self, category_id: int) -> Optional[CTCCategory]:
-        """Get a category by its ID."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.id == category_id)
-            )
-            return result.scalar_one_or_none()
-    
-    async def get_category_by_uuid(self, category_uuid: str) -> Optional[CTCCategory]:
-        """Get a category by its UUID."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.uuid == category_uuid)
-            )
-            return result.scalar_one_or_none()
-    
-    async def get_children(self, parent_id: int) -> List[CTCCategory]:
-        """Get all direct children of a category."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.parent_id == parent_id)
-            )
-            return result.scalars().all()
-    
-    async def get_children_by_uuid(self, parent_uuid: str) -> List[CTCCategory]:
-        """Get all direct children of a category using UUID."""
-        async with get_async_session() as session:
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.parent_uuid == parent_uuid)
-            )
-            return result.scalars().all()
-    
-    async def get_parent(self, category_id: int) -> Optional[CTCCategory]:
-        """Get the parent of a category."""
-        async with get_async_session() as session:
-            # First get the category to find its parent_id
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.id == category_id)
-            )
-            category = result.scalar_one_or_none()
-            
-            if not category or not category.parent_id:
-                return None
-            
-            # Get the parent
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.id == category.parent_id)
-            )
-            return result.scalar_one_or_none()
-    
-    async def get_parent_by_uuid(self, category_uuid: str) -> Optional[CTCCategory]:
-        """Get the parent of a category using UUID."""
-        async with get_async_session() as session:
-            # First get the category to find its parent_uuid
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.uuid == category_uuid)
-            )
-            category = result.scalar_one_or_none()
-            
-            if not category or not category.parent_uuid:
-                return None
-            
-            # Get the parent
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.uuid == category.parent_uuid)
-            )
-            return result.scalar_one_or_none()
-    
-    async def get_siblings(self, category_id: int) -> List[CTCCategory]:
-        """Get all siblings of a category (same parent)."""
-        async with get_async_session() as session:
-            # First get the category to find its parent_id
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.id == category_id)
-            )
-            category = result.scalar_one_or_none()
-            
-            if not category or not category.parent_id:
-                return []
-            
-            # Get all siblings
-            result = await session.execute(
-                select(CTCCategory).where(
-                    CTCCategory.parent_id == category.parent_id,
-                    CTCCategory.id != category_id
-                )
-            )
-            return result.scalars().all()
-    
-    async def get_siblings_by_uuid(self, category_uuid: str) -> List[CTCCategory]:
-        """Get all siblings of a category using UUID."""
-        async with get_async_session() as session:
-            # First get the category to find its parent_uuid
-            result = await session.execute(
-                select(CTCCategory).where(CTCCategory.uuid == category_uuid)
-            )
-            category = result.scalar_one_or_none()
-            
-            if not category or not category.parent_uuid:
-                return []
-            
-            # Get all siblings
-            result = await session.execute(
-                select(CTCCategory).where(
-                    CTCCategory.parent_uuid == category.parent_uuid,
-                    CTCCategory.uuid != category_uuid
-                )
-            )
-            return result.scalars().all()
+                    failed.append(ProductCreateResult(product=None, fuzzy_matches=fuzzy_matches, error=f"Brand '{row['brand_name']}' not found"))
+                    continue
+            if brand.distributor_id != distributor.id:
+                failed.append(ProductCreateResult(product=None, fuzzy_matches=fuzzy_matches, error=f"Brand '{row['brand_name']}' does not belong to distributor '{row['distributor_name']}'"))
+                continue
+            # Create product
+            product_data = data.model_dump()
+            price_levels_data = product_data.pop('price_levels', [])
+            product_data['uuid'] = str(uuid.uuid4())
+            product_data['distributor_id'] = distributor.id
+            product_data['brand_id'] = brand.id
+            product_data.pop('distributor_name', None)
+            product_data.pop('brand_name', None)
+            obj = ProductModel(**product_data)
+            async with get_async_session() as session:
+                session.add(obj)
+                await session.flush()
+                for price_level_data in price_levels_data:
+                    price_level = PriceLevel(product_id=obj.id, **price_level_data)
+                    session.add(price_level)
+                await session.commit()
+                await session.refresh(obj)
+            created.append(ProductCreateResult(product=to_schema(obj, Product), fuzzy_matches=fuzzy_matches))
+        return BulkProductCreateResult(created=created, failed=failed)
+
 
 storage = SQLStorage()

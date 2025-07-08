@@ -1,6 +1,6 @@
 from datetime import datetime, date
 from decimal import Decimal
-from sqlalchemy import (Column, Integer, Text, Boolean, String, Numeric, DateTime, Date, ForeignKey, Enum, Index, PrimaryKeyConstraint)
+from sqlalchemy import (Column, Integer, Text, Boolean, String, Numeric, DateTime, Date, ForeignKey, Enum, Index, PrimaryKeyConstraint, UniqueConstraint, JSON)
 from sqlalchemy.orm import relationship
 import uuid
 
@@ -23,6 +23,8 @@ class ProductModel(Base):
     shipping_class = Column(Text)
     category_name = Column(Text, nullable=False)
     product_availability = Column(Text, nullable=False, default="In Stock")
+    superceded_by = Column(Text)
+    replaces = Column(Text)
     status = Column(Text, nullable=False, default="Active")
     online = Column(Boolean, nullable=False, default=True)
     superceded_by = Column(Text)
@@ -36,17 +38,31 @@ class ProductModel(Base):
     badges_codes = Column(Text)
     stock_unmanaged = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(String, nullable=False)
+    modified_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    modified_by = Column(String, nullable=False)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String, nullable=True)
 
+    
     # Relationships
     price_levels = relationship("PriceLevel", back_populates="product", cascade="all, delete-orphan")
-    
-    # CTC relationships
-    ctc_categories = relationship("CTCCategory", back_populates="product")
+
+    #Brand relationships
+    brand_id = Column(Integer, ForeignKey("brands.id", ondelete="CASCADE"), nullable=False)
+    brand = relationship("Brand", back_populates="products")
+
+    #Distributor relationships
+    distributor_id = Column(Integer, ForeignKey("distributors.id", ondelete="CASCADE"), nullable=False)
+    distributor = relationship("Distributor", back_populates="products")
     
     # Rebate relationships
     rebate_agreements = relationship("RebateAgreementProduct", back_populates="product")
     rebate_claims = relationship("RebateClaim", back_populates="product")
+
+    # CTC relationships
+    ctc_categories = relationship("CTCCategory", back_populates="product")
+    attribute_values = relationship("ProductAttributeValue", back_populates="product")
 
 
 class PriceLevel(Base):
@@ -106,6 +122,9 @@ class CTCClass(Base):
 
     # Relationships
     types = relationship("CTCType", back_populates="class_", cascade="all, delete-orphan")
+    features_benefits = relationship("ClassFeaturesBenefits", back_populates="class_", cascade="all, delete-orphan")
+    type_features_benefits = relationship("TypeFeaturesBenefits", back_populates="class_", cascade="all, delete-orphan")
+    category_features_benefits = relationship("CategoryFeaturesBenefits", back_populates="class_", cascade="all, delete-orphan")
 
     # Indexes
     __table_args__ = (
@@ -145,6 +164,8 @@ class CTCType(Base):
     # Relationships
     class_ = relationship("CTCClass", back_populates="types")
     categories = relationship("CTCCategory", back_populates="type_", cascade="all, delete-orphan")
+    features_benefits = relationship("TypeFeaturesBenefits", back_populates="type_", cascade="all, delete-orphan")
+    category_features_benefits = relationship("CategoryFeaturesBenefits", back_populates="type_", cascade="all, delete-orphan")
 
     # Indexes
     __table_args__ = (
@@ -203,6 +224,13 @@ class CTCCategory(Base):
     # CTC attributes for categories (level 3)
     ctc_attributes = relationship(
         "CTCAttribute",
+        back_populates="category",
+        cascade="all, delete-orphan"
+    )
+    
+    # Features and benefits for categories (level 3)
+    features_benefits = relationship(
+        "CategoryFeaturesBenefits",
         back_populates="category",
         cascade="all, delete-orphan"
     )
@@ -381,6 +409,60 @@ class CTCAttribute(Base):
     )
 
 
+class ProductAttributeValue(Base):
+    """
+    Stores actual attribute values for individual products
+    This links products to their specific attribute values
+    """
+    __tablename__ = "product_attribute_values"
+
+    id = Column(Integer, primary_key=True)
+    uuid = Column(String, nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
+    active = Column(Boolean, nullable=False, default=True)
+    modified_by = Column(String, nullable=False)
+    modified = Column(DateTime, nullable=False)
+    created_by = Column(String, nullable=False)
+    created = Column(DateTime, nullable=False)
+    deleted_by = Column(String, nullable=True)
+    deleted = Column(DateTime, nullable=True)
+    
+    # The actual value for this attribute
+    value = Column(Text, nullable=False)
+    
+    # Foreign keys
+    product_id = Column(
+        Integer,
+        ForeignKey("products.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    attribute_id = Column(
+        Integer,
+        ForeignKey("ctc_attributes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    
+    # Relationships
+    product = relationship("ProductModel", back_populates="attribute_values")
+    attribute = relationship("CTCAttribute", back_populates="product_values")
+    
+    # Indexes
+    __table_args__ = (
+        Index('idx_product_attribute_values_uuid', 'uuid'),
+        Index('idx_product_attribute_values_product_id', 'product_id'),
+        Index('idx_product_attribute_values_attribute_id', 'attribute_id'),
+        # Ensure one value per product per attribute
+        UniqueConstraint('product_id', 'attribute_id', name='uq_product_attribute'),
+    )
+
+
+# Add relationship to ProductModel
+ProductModel.attribute_values = relationship("ProductAttributeValue", back_populates="product", cascade="all, delete-orphan")
+
+# Add relationship to CTCAttribute
+CTCAttribute.product_values = relationship("ProductAttributeValue", back_populates="attribute", cascade="all, delete-orphan")
+
 # Add relationship to CTCCategory for CTC attributes
 CTCCategory.ctc_attributes = relationship("CTCAttribute", back_populates="category", cascade="all, delete-orphan")
 
@@ -420,6 +502,7 @@ class Distributor(Base):
 
     # Relationships
     brands = relationship("Brand", back_populates="distributor")
+    products = relationship("ProductModel", back_populates="distributor")
 
     # Indexes
     __table_args__ = (
@@ -461,6 +544,7 @@ class Brand(Base):
 
     # Relationships
     distributor = relationship("Distributor", back_populates="brands")
+    products = relationship("ProductModel", back_populates="brand")
 
     # Indexes
     __table_args__ = (
@@ -586,4 +670,130 @@ class RebateClaim(Base):
     # Relationships
     agreement = relationship("RebateAgreement", back_populates="claims")
     product = relationship("ProductModel", back_populates="rebate_claims")
+
+
+### FEATURES AND BENEFITS MODELS ###
+
+class FeaturesBenefitsBase(Base):
+    """
+    Base class for features and benefits tables
+    """
+    __abstract__ = True
+    
+    id = Column(Integer, primary_key=True)
+    feature_name = Column(String, nullable=False)
+    feature_description = Column(Text, nullable=True)
+    benefit_name = Column(String, nullable=False)
+    benefit_description = Column(Text, nullable=True)
+    is_active = Column(Boolean, default=True, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+    
+    # Additional fields that might come from the API
+    external_id = Column(String, nullable=True, index=True)  # ID from the external system
+    external_code = Column(String, nullable=True, index=True)  # Code from the external system
+    priority = Column(Integer, nullable=True)  # Priority/order of the feature/benefit
+    category = Column(String, nullable=True)  # Category of the feature/benefit
+    tags = Column(Text, nullable=True)  # JSON string of tags
+    
+    # Metadata
+    scraped_at = Column(DateTime, nullable=True)  # When this was scraped from the API
+    source_level = Column(String, nullable=False)  # 'class', 'type', or 'category'
+    source_level_id = Column(Integer, nullable=False)  # ID from the source level
+
+
+class ClassFeaturesBenefits(FeaturesBenefitsBase):
+    """
+    Features and benefits for CTC Class level
+    """
+    __tablename__ = "class_features_benefits"
+    
+    # Foreign key to ctc_classes table
+    class_id = Column(
+        Integer,
+        ForeignKey("ctc_classes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    
+    # Relationships
+    class_ = relationship("CTCClass", back_populates="features_benefits")
+    
+    # Indexes for better query performance
+    __table_args__ = (
+        Index('idx_class_fb_external', 'external_id', 'source_level_id'),
+        Index('idx_class_fb_active', 'is_active', 'class_id'),
+    )
+
+
+class TypeFeaturesBenefits(FeaturesBenefitsBase):
+    """
+    Features and benefits for CTC Type level
+    """
+    __tablename__ = "type_features_benefits"
+    
+    # Foreign keys
+    type_id = Column(
+        Integer,
+        ForeignKey("ctc_types.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    class_id = Column(
+        Integer,
+        ForeignKey("ctc_classes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    
+    # Relationships
+    type_ = relationship("CTCType", back_populates="features_benefits")
+    class_ = relationship("CTCClass", back_populates="type_features_benefits")
+    
+    # Indexes for better query performance
+    __table_args__ = (
+        Index('idx_type_fb_external', 'external_id', 'source_level_id'),
+        Index('idx_type_fb_active', 'is_active', 'type_id'),
+        Index('idx_type_fb_class', 'class_id', 'is_active'),
+    )
+
+
+class CategoryFeaturesBenefits(FeaturesBenefitsBase):
+    """
+    Features and benefits for CTC Category level
+    """
+    __tablename__ = "category_features_benefits"
+    
+    # Foreign keys
+    category_id = Column(
+        Integer,
+        ForeignKey("ctc_categories.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    type_id = Column(
+        Integer,
+        ForeignKey("ctc_types.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    class_id = Column(
+        Integer,
+        ForeignKey("ctc_classes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    
+    # Relationships
+    category = relationship("CTCCategory", back_populates="features_benefits")
+    type_ = relationship("CTCType", back_populates="category_features_benefits")
+    class_ = relationship("CTCClass", back_populates="category_features_benefits")
+    
+    # Indexes for better query performance
+    __table_args__ = (
+        Index('idx_category_fb_external', 'external_id', 'source_level_id'),
+        Index('idx_category_fb_active', 'is_active', 'category_id'),
+        Index('idx_category_fb_type', 'type_id', 'is_active'),
+        Index('idx_category_fb_class', 'class_id', 'is_active'),
+    )
 

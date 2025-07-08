@@ -22,7 +22,7 @@ class CTCInitializer:
     """Handles automatic initialization of CTC categories data."""
     
     def __init__(self):
-        self.json_file_path = "attnfeat/ctc_categories.json"
+        self.json_file_path = "data_management/data/ctc_categories.json"
     
     async def table_exists(self) -> bool:
         """Check if the ctc_categories table exists."""

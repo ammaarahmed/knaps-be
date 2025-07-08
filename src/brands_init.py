@@ -24,12 +24,12 @@ async def load_brands_data() -> List[Dict]:
     Load brands data from the JSON file
     """
     try:
-        with open('distributor/brands_data.json', 'r', encoding='utf-8') as file:
+        with open('data_management/data/brands_data.json', 'r', encoding='utf-8') as file:
             data = json.load(file)
         logger.info(f"Loaded {len(data)} brands from brands_data.json")
         return data
     except FileNotFoundError:
-        logger.error("brands_data.json file not found in distributor/ directory")
+        logger.error("brands_data.json file not found in data_management/data/ directory")
         return []
     except json.JSONDecodeError as e:
         logger.error(f"Error parsing brands_data.json: {e}")
@@ -58,17 +58,26 @@ async def get_or_create_distributor(
     
     # Create new distributor
     try:
-        # Parse datetime strings
-        modified = datetime.fromisoformat(distributor_data['modified'].replace('Z', '+00:00'))
-        created = datetime.fromisoformat(distributor_data['created'].replace('Z', '+00:00'))
+        # Parse datetime strings and convert to UTC naive datetime
+        modified = datetime.fromisoformat(distributor_data['modified'].replace('Z', '+00:00')).replace(tzinfo=None)
+        created = datetime.fromisoformat(distributor_data['created'].replace('Z', '+00:00')).replace(tzinfo=None)
         
         # Handle deleted fields
         deleted = None
         if distributor_data.get('deleted'):
-            deleted = datetime.fromisoformat(distributor_data['deleted'].replace('Z', '+00:00'))
+            deleted = datetime.fromisoformat(distributor_data['deleted'].replace('Z', '+00:00')).replace(tzinfo=None)
         
         # Extract default extended credits info
         default_extended_credits = distributor_data.get('default_extended_credits', {})
+        
+        # Helper function to extract string from dict or return as is
+        def extract_string_value(value):
+            if value is None:
+                return None
+            if isinstance(value, dict):
+                # For pp_claim_from, extract the 'code' field
+                return value.get('code')
+            return str(value) if value is not None else None
         
         distributor = Distributor(
             id=distributor_data['id'],
@@ -90,7 +99,7 @@ async def get_or_create_distributor(
             business_number=distributor_data.get('business_number'),
             accounting_date=distributor_data.get('accounting_date'),
             web_portal_url=distributor_data.get('web_portal_url'),
-            pp_claim_from=distributor_data.get('pp_claim_from'),
+            pp_claim_from=extract_string_value(distributor_data.get('pp_claim_from')),
             fis_minimum_order=distributor_data.get('FIS_minimum_order'),
             default_extended_credits_code=default_extended_credits.get('code'),
             default_extended_credits_name=default_extended_credits.get('name')
@@ -115,14 +124,14 @@ async def create_brand(
     Create a new brand
     """
     try:
-        # Parse datetime strings
-        modified = datetime.fromisoformat(brand_data['modified'].replace('Z', '+00:00'))
-        created = datetime.fromisoformat(brand_data['created'].replace('Z', '+00:00'))
+        # Parse datetime strings and convert to UTC naive datetime
+        modified = datetime.fromisoformat(brand_data['modified'].replace('Z', '+00:00')).replace(tzinfo=None)
+        created = datetime.fromisoformat(brand_data['created'].replace('Z', '+00:00')).replace(tzinfo=None)
         
         # Handle deleted fields
         deleted = None
         if brand_data.get('deleted'):
-            deleted = datetime.fromisoformat(brand_data['deleted'].replace('Z', '+00:00'))
+            deleted = datetime.fromisoformat(brand_data['deleted'].replace('Z', '+00:00')).replace(tzinfo=None)
         
         brand = Brand(
             id=brand_data['id'],

@@ -22,12 +22,16 @@ async def drop_all_tables():
     if engine is None:
         logger.warning("Engine not initialized, cannot drop tables")
         return
-    
+
     logger.info("Dropping all tables")
     async with engine.begin() as conn:
-        # Use CASCADE to handle foreign key dependencies
-        await conn.execute(text("DROP SCHEMA public CASCADE"))
-        await conn.execute(text("CREATE SCHEMA public"))
+        dialect_name = conn.dialect.name
+        if dialect_name == "sqlite":
+            # SQLite doesn't support DROP SCHEMA, just drop all tables
+            await conn.run_sync(Base.metadata.drop_all)
+        else:
+            await conn.execute(text("DROP SCHEMA public CASCADE"))
+            await conn.execute(text("CREATE SCHEMA public"))
     logger.info("All tables dropped successfully")
 
 async def init_db(drop_existing: bool = True, load_ctc_data: bool = False, load_brands_data: bool = False):

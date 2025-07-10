@@ -27,7 +27,6 @@ class ProductModel(Base):
     replaces = Column(Text)
     status = Column(Text, nullable=False, default="Active")
     online = Column(Boolean, nullable=False, default=True)
-    superceded_by = Column(Text)
     ean = Column(Text)
     pack_size = Column(Integer, nullable=False, default=1)
     core_group = Column(Text)
@@ -37,6 +36,18 @@ class ProductModel(Base):
     features_and_benefits_codes = Column(Text)
     badges_codes = Column(Text)
     stock_unmanaged = Column(Boolean, nullable=False, default=False)
+
+    # New fields for fuller product representation
+    active = Column(Boolean, nullable=False, default=True)
+    purchaser = Column(String, nullable=True)
+    icon_owner = Column(String, nullable=True)
+    is_gift_card = Column(Boolean, nullable=False, default=False)
+    gift_card_limit = Column(Numeric(12, 2), nullable=True)
+    has_promotions = Column(Boolean, nullable=False, default=False)
+    store = Column(String, nullable=True)
+    web_link = Column(Text)
+    edit_link = Column(Text)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     created_by = Column(String, nullable=False)
     modified_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -63,6 +74,7 @@ class ProductModel(Base):
     # CTC relationships
     ctc_categories = relationship("CTCCategory", back_populates="product")
     attribute_values = relationship("ProductAttributeValue", back_populates="product")
+    my_price = relationship("MyPrice", back_populates="product", uselist=False, cascade="all, delete-orphan")
 
 
 class PriceLevel(Base):
@@ -72,11 +84,36 @@ class PriceLevel(Base):
     product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False)
     price_level = Column(String, nullable=False)  # e.g., "MWP", "Trade", "GO", "RRP"
     type = Column(String, nullable=False)  # e.g., "Standard", "Promotional", "Bulk", etc.
-    value_excl = Column(Numeric(10, 2), nullable=False)  # Value excluding tax
-    value_incl = Column(Numeric(10, 2), nullable=True)   # Value including tax
+    value_excl = Column(Numeric(12, 4), nullable=False)  # Value excluding tax
+    value_incl = Column(Numeric(12, 4), nullable=True)   # Value including tax
     comments = Column(Text, nullable=True)  # Additional comments about this price level
+
+    # Extended pricing information
+    active = Column(Boolean, nullable=False, default=True)
+    external_id = Column(Integer, nullable=True)
+    store = Column(String, nullable=True)
+    value_stor = Column(Numeric(12, 4), nullable=True)
+    value_stor_incl = Column(Numeric(12, 4), nullable=True)
+    value_hoff = Column(Numeric(12, 4), nullable=True)
+    value_hoff_incl = Column(Numeric(12, 4), nullable=True)
+    valid_start = Column(DateTime, nullable=True)
+    valid_end = Column(DateTime, nullable=True)
+    claim_start = Column(DateTime, nullable=True)
+    claim_end = Column(DateTime, nullable=True)
+    bonus_status = Column(String, nullable=True)
+    initial_value_stor = Column(Numeric(12, 4), nullable=True)
+    initial_value_stor_incl = Column(Numeric(12, 4), nullable=True)
+    initial_value_hoff = Column(Numeric(12, 4), nullable=True)
+    initial_value_hoff_incl = Column(Numeric(12, 4), nullable=True)
+    has_overrides = Column(Boolean, nullable=False, default=False)
+    current_override_price = Column(Numeric(12, 4), nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_by = Column(String, nullable=True)
+    modified_by = Column(String, nullable=True)
+    deleted_at = Column(DateTime, nullable=True)
+    deleted_by = Column(String, nullable=True)
 
     # Relationships
     product = relationship("ProductModel", back_populates="price_levels")
@@ -796,4 +833,48 @@ class CategoryFeaturesBenefits(FeaturesBenefitsBase):
         Index('idx_category_fb_type', 'type_id', 'is_active'),
         Index('idx_category_fb_class', 'class_id', 'is_active'),
     )
+
+
+class MyPrice(Base):
+    """Aggregated pricing information for a product"""
+    __tablename__ = "my_prices"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_id = Column(Integer, ForeignKey("products.id", ondelete="CASCADE"), nullable=False, unique=True)
+    uuid = Column(String, nullable=False, unique=True, default=lambda: str(uuid.uuid4()))
+    active = Column(Boolean, nullable=False, default=True)
+
+    go = Column(Numeric(12, 4), nullable=True)
+    go_special = Column(Numeric(12, 4), nullable=True)
+    rrp = Column(Numeric(12, 4), nullable=True)
+    rrp_special = Column(Numeric(12, 4), nullable=True)
+    trade = Column(Numeric(12, 4), nullable=True)
+    off_invoice = Column(Numeric(12, 4), nullable=True)
+    invoice = Column(Numeric(12, 4), nullable=True)
+    vendor_percent = Column(Numeric(12, 4), nullable=True)
+    vendor_dollar = Column(Numeric(12, 4), nullable=True)
+    bonus_percent = Column(Numeric(12, 4), nullable=True)
+    bonus_dollar = Column(Numeric(12, 4), nullable=True)
+    brand_percent = Column(Numeric(12, 4), nullable=True)
+    hoff_percent = Column(Numeric(12, 4), nullable=True)
+    hoff_dollar = Column(Numeric(12, 4), nullable=True)
+    net = Column(Numeric(12, 4), nullable=True)
+    sellthru_dollar = Column(Numeric(12, 4), nullable=True)
+    nac = Column(Numeric(12, 4), nullable=True)
+    off_invoice_hoff = Column(Numeric(12, 4), nullable=True)
+    invoice_hoff = Column(Numeric(12, 4), nullable=True)
+    vendor_percent_hoff = Column(Numeric(12, 4), nullable=True)
+    vendor_dollar_hoff = Column(Numeric(12, 4), nullable=True)
+    bonus_percent_hoff = Column(Numeric(12, 4), nullable=True)
+    bonus_dollar_hoff = Column(Numeric(12, 4), nullable=True)
+    brand_percent_hoff = Column(Numeric(12, 4), nullable=True)
+    net_hoff = Column(Numeric(12, 4), nullable=True)
+    sellthru_dollar_hoff = Column(Numeric(12, 4), nullable=True)
+    nac_hoff = Column(Numeric(12, 4), nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    modified_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # Relationships
+    product = relationship("ProductModel", back_populates="my_price", uselist=False)
 

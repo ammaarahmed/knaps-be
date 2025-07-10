@@ -46,6 +46,24 @@ class PriceLevel(ORMBase):
     value_excl: Decimal  # Value excluding tax
     value_incl: Optional[Decimal] = None  # Value including tax
     comments: Optional[str] = None  # Additional comments about this price level
+    active: Optional[bool] = True
+    external_id: Optional[int] = None
+    store: Optional[str] = None
+    value_stor: Optional[Decimal] = None
+    value_stor_incl: Optional[Decimal] = None
+    value_hoff: Optional[Decimal] = None
+    value_hoff_incl: Optional[Decimal] = None
+    valid_start: Optional[datetime] = None
+    valid_end: Optional[datetime] = None
+    claim_start: Optional[datetime] = None
+    claim_end: Optional[datetime] = None
+    bonus_status: Optional[str] = None
+    initial_value_stor: Optional[Decimal] = None
+    initial_value_stor_incl: Optional[Decimal] = None
+    initial_value_hoff: Optional[Decimal] = None
+    initial_value_hoff_incl: Optional[Decimal] = None
+    has_overrides: Optional[bool] = False
+    current_override_price: Optional[Decimal] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -55,6 +73,24 @@ class InsertPriceLevel(ORMBase):
     value_excl: Decimal
     value_incl: Optional[Decimal] = None
     comments: Optional[str] = None
+    active: Optional[bool] = True
+    external_id: Optional[int] = None
+    store: Optional[str] = None
+    value_stor: Optional[Decimal] = None
+    value_stor_incl: Optional[Decimal] = None
+    value_hoff: Optional[Decimal] = None
+    value_hoff_incl: Optional[Decimal] = None
+    valid_start: Optional[datetime] = None
+    valid_end: Optional[datetime] = None
+    claim_start: Optional[datetime] = None
+    claim_end: Optional[datetime] = None
+    bonus_status: Optional[str] = None
+    initial_value_stor: Optional[Decimal] = None
+    initial_value_stor_incl: Optional[Decimal] = None
+    initial_value_hoff: Optional[Decimal] = None
+    initial_value_hoff_incl: Optional[Decimal] = None
+    has_overrides: Optional[bool] = False
+    current_override_price: Optional[Decimal] = None
 
 # Product models
 class InsertProduct(ORMBase):
@@ -81,6 +117,15 @@ class InsertProduct(ORMBase):
     features_and_benefits_codes: Optional[str] = None
     badges_codes: Optional[str] = None
     stock_unmanaged: bool = False
+    active: bool = True
+    purchaser: Optional[str] = None
+    icon_owner: Optional[str] = None
+    is_gift_card: bool = False
+    gift_card_limit: Optional[Decimal] = None
+    has_promotions: bool = False
+    store: Optional[str] = None
+    web_link: Optional[str] = None
+    edit_link: Optional[str] = None
 
 class Product(ORMBase):
     uuid: Optional[str] = None  # Optional UUID field for updates
@@ -107,6 +152,86 @@ class Product(ORMBase):
     features_and_benefits_codes: Optional[str] = None
     badges_codes: Optional[str] = None
     stock_unmanaged: Optional[bool] = None
+    active: Optional[bool] = None
+    purchaser: Optional[str] = None
+    icon_owner: Optional[str] = None
+    is_gift_card: Optional[bool] = None
+    gift_card_limit: Optional[Decimal] = None
+    has_promotions: Optional[bool] = None
+    store: Optional[str] = None
+    web_link: Optional[str] = None
+    edit_link: Optional[str] = None
+    my_price: Optional["MyPrice"] = None
+
+
+class MyPrice(ORMBase):
+    id: Optional[int] = None
+    product_id: int
+    uuid: Optional[str] = None
+    active: Optional[bool] = True
+
+    go: Optional[Decimal] = None
+    go_special: Optional[Decimal] = None
+    rrp: Optional[Decimal] = None
+    rrp_special: Optional[Decimal] = None
+    trade: Optional[Decimal] = None
+    off_invoice: Optional[Decimal] = None
+    invoice: Optional[Decimal] = None
+    vendor_percent: Optional[Decimal] = None
+    vendor_dollar: Optional[Decimal] = None
+    bonus_percent: Optional[Decimal] = None
+    bonus_dollar: Optional[Decimal] = None
+    brand_percent: Optional[Decimal] = None
+    hoff_percent: Optional[Decimal] = None
+    hoff_dollar: Optional[Decimal] = None
+    net: Optional[Decimal] = None
+    sellthru_dollar: Optional[Decimal] = None
+    nac: Optional[Decimal] = None
+    off_invoice_hoff: Optional[Decimal] = None
+    invoice_hoff: Optional[Decimal] = None
+    vendor_percent_hoff: Optional[Decimal] = None
+    vendor_dollar_hoff: Optional[Decimal] = None
+    bonus_percent_hoff: Optional[Decimal] = None
+    bonus_dollar_hoff: Optional[Decimal] = None
+    brand_percent_hoff: Optional[Decimal] = None
+    net_hoff: Optional[Decimal] = None
+    sellthru_dollar_hoff: Optional[Decimal] = None
+    nac_hoff: Optional[Decimal] = None
+    created_at: Optional[datetime] = None
+    modified_at: Optional[datetime] = None
+
+
+class InsertMyPrice(ORMBase):
+    """Schema for creating MyPrice records."""
+    product_id: int
+    active: Optional[bool] = True
+    go: Optional[Decimal] = None
+    go_special: Optional[Decimal] = None
+    rrp: Optional[Decimal] = None
+    rrp_special: Optional[Decimal] = None
+    trade: Optional[Decimal] = None
+    off_invoice: Optional[Decimal] = None
+    invoice: Optional[Decimal] = None
+    vendor_percent: Optional[Decimal] = None
+    vendor_dollar: Optional[Decimal] = None
+    bonus_percent: Optional[Decimal] = None
+    bonus_dollar: Optional[Decimal] = None
+    brand_percent: Optional[Decimal] = None
+    hoff_percent: Optional[Decimal] = None
+    hoff_dollar: Optional[Decimal] = None
+    net: Optional[Decimal] = None
+    sellthru_dollar: Optional[Decimal] = None
+    nac: Optional[Decimal] = None
+    off_invoice_hoff: Optional[Decimal] = None
+    invoice_hoff: Optional[Decimal] = None
+    vendor_percent_hoff: Optional[Decimal] = None
+    vendor_dollar_hoff: Optional[Decimal] = None
+    bonus_percent_hoff: Optional[Decimal] = None
+    bonus_dollar_hoff: Optional[Decimal] = None
+    brand_percent_hoff: Optional[Decimal] = None
+    net_hoff: Optional[Decimal] = None
+    sellthru_dollar_hoff: Optional[Decimal] = None
+    nac_hoff: Optional[Decimal] = None
 
 # Rebate models
 
